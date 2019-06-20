@@ -81,6 +81,8 @@ static void VS_CC jpegCreate(const VSMap *in, VSMap *out, void *userData,
     d->vi.width = d->width1;
     d->vi.height = d->height1;
     d->vi.numFrames = 1;
+    d->vi.fpsNum = 1;
+    d->vi.fpsDen = 1;
 
     if (jpegColorspace == 2) {
         d->width2 = d->width1 / 2;
