@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <vapoursynth/VSHelper.h>
 #include <vapoursynth/VapourSynth.h>
 
 #include <turbojpeg.h>
@@ -42,19 +43,13 @@ static const VSFrameRef *VS_CC jpegGetFrame(int n, int activationReason,
 
     VSFrameRef *dst =
         vsapi->newVideoFrame(d->vi.format, d->width1, d->height1, NULL, core);
-    int stride1 = vsapi->getStride(dst, 0);
-    int stride2 = vsapi->getStride(dst, 1);
-    uint8_t *plane1 = vsapi->getWritePtr(dst, 0);
-    uint8_t *plane2 = vsapi->getWritePtr(dst, 1);
-    uint8_t *plane3 = vsapi->getWritePtr(dst, 2);
 
-    for (int i = 0; i < d->height1; i++)
-        memcpy(plane1 + (i * stride1), d->plane1 + (i * d->width1), d->width1);
-
-    for (int i = 0; i < d->height2; i++) {
-        memcpy(plane2 + (i * stride2), d->plane2 + (i * d->width2), d->width2);
-        memcpy(plane3 + (i * stride2), d->plane3 + (i * d->width2), d->width2);
-    }
+    vs_bitblt(vsapi->getWritePtr(dst, 0), vsapi->getStride(dst, 0), d->plane1,
+              d->width1, d->width1, d->height1);
+    vs_bitblt(vsapi->getWritePtr(dst, 1), vsapi->getStride(dst, 1), d->plane2,
+              d->width2, d->width2, d->height2);
+    vs_bitblt(vsapi->getWritePtr(dst, 2), vsapi->getStride(dst, 2), d->plane2,
+              d->width2, d->width2, d->height2);
 
     return dst;
 }
@@ -200,7 +195,7 @@ static void VS_CC jpegCreate(const VSMap *in, VSMap *out, void *userData,
     tjDestroy(handle);
 
     vsapi->createFilter(in, out, "Jpeg", jpegInit, jpegGetFrame, jpegFree,
-                        fmParallel, 0, d, core);
+                        fmParallel, nfNoCache, d, core);
 }
 
 static void VS_CC jpegsCreate(const VSMap *in, VSMap *out, void *userData,
