@@ -208,7 +208,6 @@ static void VS_CC jpegsCreate(const VSMap *in, VSMap *out, void *userData,
     d->paths = malloc(d->vi.numFrames * sizeof(char *));
     for (int i = 0; i < d->vi.numFrames; i++) {
         d->paths[i] = malloc(vsapi->propGetDataSize(in, "path", i, NULL) + 1);
-        printf("%s", d->paths[i]);
         strcpy(d->paths[i], vsapi->propGetData(in, "path", i, NULL));
     }
 
