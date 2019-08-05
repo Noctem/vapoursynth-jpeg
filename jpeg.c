@@ -2,11 +2,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
+#include <turbojpeg.h>
 #include <vapoursynth/VSHelper.h>
 #include <vapoursynth/VapourSynth.h>
-
-#include <turbojpeg.h>
 
 typedef struct JpegData {
     VSVideoInfo vi;
@@ -188,9 +186,9 @@ static void VS_CC jpegCreate(const VSMap *in, VSMap *out, void *userData,
         int stride = vsapi->getStride(d->frame, 0);
 
         if (height < actualHeight || stride < actualWidth) {
-            int chromaStride = (actualWidth << subW) + 31 & -32;
+            int chromaStride = ((actualWidth << subW) + 31) & -32;
             int chromaMem = chromaStride * (actualHeight << subH);
-            int strides[3] = {actualWidth + 31 & -32, chromaStride,
+            int strides[3] = {(actualWidth + 31) & -32, chromaStride,
                               chromaStride};
             uint8_t *buf[3] = {(uint8_t *)malloc(strides[0] * actualHeight),
                                (uint8_t *)malloc(chromaMem),
@@ -394,8 +392,10 @@ static void VS_CC stitchCreate(const VSMap *in, VSMap *out, void *userData,
                     vsapi->setError(out, "Jpeg: unsupported color space");
                     goto free3;
             }
-        } else if (imageHeight != height || imageColorspace != colorspace ||
-                   imageSubSamp != subSamp) {
+        } else if (imageHeight != height ||
+                   ((imageColorspace != colorspace ||
+                     imageSubSamp != subSamp) &&
+                    (imageSubSamp != TJSAMP_444 || subSamp != TJSAMP_420))) {
             vsapi->setError(out, "Stitch: mismatched images");
             goto free3;
         }
@@ -415,10 +415,11 @@ static void VS_CC stitchCreate(const VSMap *in, VSMap *out, void *userData,
         switch (colorspace) {
             case TJCS_YCbCr: {
                 for (int i = 0; i < 3; i++) {
-                    strides[fileNum][i] = tjPlaneWidth(i, imageWidth, subSamp);
-                    planes[fileNum][i] =
-                        (uint8_t *)malloc(strides[fileNum][i] *
-                                          tjPlaneHeight(i, height, subSamp));
+                    strides[fileNum][i] =
+                        tjPlaneWidth(i, imageWidth, imageSubSamp);
+                    planes[fileNum][i] = (uint8_t *)malloc(
+                        strides[fileNum][i] *
+                        tjPlaneHeight(i, height, imageSubSamp));
                     widths[fileNum][i] = imageWidth >> subW;
 
                     if (planes[fileNum][i] == NULL) {
@@ -435,6 +436,20 @@ static void VS_CC stitchCreate(const VSMap *in, VSMap *out, void *userData,
                         strides[fileNum], 0, TJFLAG_ACCURATEDCT) == -1) {
                     vsapi->setError(out, tjGetErrorStr2(handle));
                     goto free3;
+                }
+                if (imageSubSamp != subSamp) {
+                    for (int y = 0; y < (height >> 1); y++) {
+                        for (int x = 0; x < widths[fileNum][1]; x++) {
+                            planes[fileNum][1][(y * strides[fileNum][1]) + x] =
+                                planes[fileNum][1]
+                                      [((y * 2) * strides[fileNum][1]) +
+                                       (x * 2)];
+                            planes[fileNum][2][(y * strides[fileNum][2]) + x] =
+                                planes[fileNum][2]
+                                      [((y * 2) * strides[fileNum][2]) +
+                                       (x * 2)];
+                        }
+                    }
                 }
                 break;
             }
@@ -508,16 +523,19 @@ static void VS_CC stitchCreate(const VSMap *in, VSMap *out, void *userData,
             // crop the right side of the last image by the remainder
             widths[numFiles - 1][0] -= remain;
             d->vi.width -= remain;
+        }
+        int chromaWidth = 0;
+        for (int i = 0; i < numFiles; i++) chromaWidth += widths[i][1];
 
-            // expand the chroma width by the remainder
-            for (int i = 0; i < remain; i++) {
-                if (i < numFiles) {
-                    widths[i][1] += 1;
-                    widths[i][2] += 1;
-                } else {
-                    widths[0][1] += 1;
-                    widths[0][2] += 1;
-                }
+        remain = (d->vi.width >> subW) - chromaWidth;
+        // expand chroma widths for missing pixels
+        for (int i = 0; i < remain; i++) {
+            if (i < numFiles) {
+                widths[i][1] += 1;
+                widths[i][2] += 1;
+            } else {
+                widths[0][1] += 1;
+                widths[0][2] += 1;
             }
         }
     }
@@ -525,8 +543,7 @@ static void VS_CC stitchCreate(const VSMap *in, VSMap *out, void *userData,
     int heights[3] = {height, height, height};
     if (subH > 0) {
         heights[0] = d->vi.height = height & -(subH * 2);
-        for (int i = 1; i < numPlanes; i++)
-            heights[i] >>= subH;
+        for (int i = 1; i < numPlanes; i++) heights[i] >>= subH;
     } else
         d->vi.height = height;
 
